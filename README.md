@@ -169,6 +169,24 @@ void Model::init() {
 ```
 
 ### Chapter 3
+
+#### Vulkan validation layer errors
+Recent versions of the Vulkan SDK generate a new validation layer message:
+```
+[ERROR: Validation]
+vkQueueSubmit(): pSubmits[0].pSignalSemaphores[0] (VkSemaphore 0x230000000023) is being signaled by VkQueue 0x562618ac7e20, but it may still be in use by VkSwapchainKHR 0x30000000003.
+Most recently acquired image indices: [0], 1.
+(Brackets mark the last use of VkSemaphore 0x230000000023 in a presentation operation.)
+Swapchain image 0 was presented but was not re-acquired, so VkSemaphore 0x230000000023 may still be in use and cannot be safely reused with image index 1.
+Vulkan insight: See https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html for details on swapchain semaphore reuse. Examples of possible approaches:
+   a) Use a separate semaphore per swapchain image. Index these semaphores using the index of the acquired image.
+   b) Consider the VK_KHR_swapchain_maintenance1 extension. It allows using a VkFence with the presentation operation.
+The Vulkan spec states: Each binary semaphore element of the pSignalSemaphores member of any element of pSubmits must be unsignaled when the semaphore signal operation it defines is executed on the device (https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html#VUID-vkQueueSubmit-pSignalSemaphores-00067)
+```
+
+The solution b) was implemented: `VK_KHR_swapchain_maintenance1` and a separate presentation fence was added. Changes to the book text are not required since the basic operations for init and presenting are the same.
+
+#### CMake changes
 A similar change as for Chapter 2 is needed for Chapter three. For Vulkan, we also need to compile the shaders before storing the SPIR-V code next to the executable file.
 
 Add the following lines to the file `CMakeLists.txt` in the root folder of the `vulkan_renderer` project, right after the `find_package` lines:
