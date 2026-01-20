@@ -81,9 +81,15 @@ bool VkRenderer::init(unsigned int width, unsigned int height) {
 }
 
 bool VkRenderer::deviceInit() {
-  /* instance and window */
+  /* instance and window - use Vulkan 1.1 for extra extensions */
   vkb::InstanceBuilder instBuild;
-  auto instRet = instBuild.use_default_debug_messenger().request_validation_layers().build();
+  auto instRet = instBuild
+    .use_default_debug_messenger()
+    .request_validation_layers()
+    .enable_extension(VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME) // required to use VK_EXT_swapchain_maintenance1
+    .enable_extension(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) // required to use VK_EXT_surface_maintenance1
+    .require_api_version(1, 1, 0)
+    .build();
   // auto instRet = instBuild.build();
   if (!instRet) {
     Logger::log(1, "%s error: could not build vkb instance\n", __FUNCTION__);
@@ -98,9 +104,19 @@ bool VkRenderer::deviceInit() {
     return false;
   }
 
+  /* We need VK_EXT_swapchain_maintenance1 for a present fence */
+  VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT swapchainMaintenance1{};
+  swapchainMaintenance1.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
+  swapchainMaintenance1.swapchainMaintenance1 = VK_TRUE;
+
   /* just get the first available device */
   vkb::PhysicalDeviceSelector physicalDevSel{mRenderData.rdVkbInstance};
-  auto physicalDevSelRet = physicalDevSel.set_surface(mSurface).select();
+  auto physicalDevSelRet = physicalDevSel
+    .set_surface(mSurface)
+    .add_required_extension(VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
+    .add_required_extension_features(swapchainMaintenance1)
+    .select();
+
   if (!physicalDevSelRet) {
     Logger::log(1, "%s error: could not get physical devices\n", __FUNCTION__);
     return false;
@@ -413,6 +429,11 @@ bool VkRenderer::draw() {
     return false;
   }
 
+  if (vkWaitForFences(mRenderData.rdVkbDevice.device, 1, &mRenderData.rdPresentFence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+    Logger::log(1, "%s error: waiting for present fence failed\n", __FUNCTION__);
+    return false;
+  }
+
   uint32_t imageIndex = 0;
   VkResult result = vkAcquireNextImageKHR(mRenderData.rdVkbDevice.device,
       mRenderData.rdVkbSwapchain.swapchain,
@@ -432,6 +453,11 @@ bool VkRenderer::draw() {
 
   if (vkResetFences(mRenderData.rdVkbDevice.device, 1, &mRenderData.rdRenderFence) != VK_SUCCESS) {
     Logger::log(1, "%s error:  fence reset failed\n", __FUNCTION__);
+    return false;
+  }
+
+  if (vkResetFences(mRenderData.rdVkbDevice.device, 1, &mRenderData.rdPresentFence) != VK_SUCCESS) {
+    Logger::log(1, "%s error: presence fence reset failed\n", __FUNCTION__);
     return false;
   }
 
@@ -536,8 +562,15 @@ bool VkRenderer::draw() {
     return false;
   }
 
+  /* Extra fence for presentation */
+  VkSwapchainPresentFenceInfoEXT presentFenceInfo{};
+  presentFenceInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT;
+  presentFenceInfo.swapchainCount = 1;
+  presentFenceInfo.pFences = &mRenderData.rdPresentFence;
+
   VkPresentInfoKHR presentInfo{};
   presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+  presentInfo.pNext = &presentFenceInfo;
   presentInfo.waitSemaphoreCount = 1;
   presentInfo.pWaitSemaphores = &mRenderData.rdRenderSemaphore;
 
